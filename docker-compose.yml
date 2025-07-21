@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  agent-service:
+    build: 
+      context: .
+      dockerfile: services/agent_service/Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      - AGENT_SERVICE_REDIS_HOST=redis
+      - AGENT_SERVICE_LOG_LEVEL=INFO
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  workflow-service:
+    build:
+      context: .
+      dockerfile: services/workflow_service/Dockerfile
+    ports:
+      - "8002:8002"
+    environment:
+      - WORKFLOW_SERVICE_REDIS_HOST=redis
+      - WORKFLOW_SERVICE_AGENT_SERVICE_URL=http://agent-service:8001
+      - WORKFLOW_SERVICE_LOG_LEVEL=INFO
+    depends_on:
+      - redis
+      - agent-service
+
+volumes:
+  redis_data:
