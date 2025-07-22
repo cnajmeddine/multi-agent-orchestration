@@ -41,5 +41,21 @@ services:
       - redis
       - agent-service
 
+  communication-service:
+    build:
+      context: .
+      dockerfile: services/communication_service/Dockerfile
+    ports:
+      - "8004:8004"
+    environment:
+      - COMM_SERVICE_REDIS_HOST=redis
+      - COMM_SERVICE_AGENT_SERVICE_URL=http://agent-service:8001
+      - COMM_SERVICE_WORKFLOW_SERVICE_URL=http://workflow-service:8002
+      - COMM_SERVICE_LOG_LEVEL=INFO
+    depends_on:
+      - redis
+      - agent-service
+      - workflow-service
+
 volumes:
   redis_data:
