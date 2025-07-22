@@ -1,7 +1,7 @@
 # agents.py - Agent CRUD endpoints
 # This file defines the API endpoints for managing agents.
 
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Request
 from typing import List, Optional
 import logging
 
@@ -20,23 +20,29 @@ router = APIRouter(prefix="/agents", tags=["agents"])
 def get_registry():
     return AgentRegistry()
 
-# In-memory store for actual agent instances (PoC only)
-_agent_instances = {}
+def get_bootstrap(request: Request):
+    """Get bootstrap instance from app state."""
+    if not hasattr(request.app.state, 'bootstrap'):
+        raise HTTPException(status_code=500, detail="Bootstrap not initialized")
+    return request.app.state.bootstrap
 
 @router.post("/register", response_model=AgentMetadata)
 async def register_agent(
-    request: AgentRegistrationRequest,
+    request_data: AgentRegistrationRequest,
+    request: Request,
     registry: AgentRegistry = Depends(get_registry)
 ):
     """Register a new agent."""
     try:
+        bootstrap = get_bootstrap(request)
+        
         # Create agent metadata
         agent_metadata = AgentMetadata(
-            name=request.name,
-            agent_type=request.agent_type,
-            capabilities=request.capabilities,
-            config=request.config,
-            max_concurrent_tasks=request.max_concurrent_tasks,
+            name=request_data.name,
+            agent_type=request_data.agent_type,
+            capabilities=request_data.capabilities,
+            config=request_data.config,
+            max_concurrent_tasks=request_data.max_concurrent_tasks,
             status=AgentStatus.IDLE
         )
         
@@ -45,15 +51,16 @@ async def register_agent(
         if not success:
             raise HTTPException(status_code=500, detail="Failed to register agent")
         
-        # Create actual agent instance (PoC: store in memory)
-        if request.agent_type == "text_processor":
-            agent_instance = TextProcessingAgent(agent_metadata.agent_id, request.config)
-        elif request.agent_type == "data_analyzer":
-            agent_instance = DataAnalysisAgent(agent_metadata.agent_id, request.config)
+        # Create actual agent instance
+        if request_data.agent_type == "text_processor":
+            agent_instance = TextProcessingAgent(agent_metadata.agent_id, request_data.config)
+        elif request_data.agent_type == "data_analyzer":
+            agent_instance = DataAnalysisAgent(agent_metadata.agent_id, request_data.config)
         else:
-            raise HTTPException(status_code=400, detail=f"Unknown agent type: {request.agent_type}")
+            raise HTTPException(status_code=400, detail=f"Unknown agent type: {request_data.agent_type}")
         
-        _agent_instances[agent_metadata.agent_id] = agent_instance
+        # Store in bootstrap
+        bootstrap.add_agent_instance(agent_metadata.agent_id, agent_instance)
         
         logger.info(f"Successfully registered agent {agent_metadata.agent_id}")
         return agent_metadata
@@ -65,16 +72,19 @@ async def register_agent(
 @router.delete("/unregister/{agent_id}")
 async def unregister_agent(
     agent_id: str,
+    request: Request,
     registry: AgentRegistry = Depends(get_registry)
 ):
     """Unregister an agent."""
     try:
+        bootstrap = get_bootstrap(request)
+        
         success = await registry.unregister_agent(agent_id)
         if not success:
             raise HTTPException(status_code=404, detail="Agent not found")
         
-        # Remove from memory
-        _agent_instances.pop(agent_id, None)
+        # Remove from bootstrap
+        bootstrap.remove_agent_instance(agent_id)
         
         return {"message": f"Agent {agent_id} unregistered successfully"}
         
@@ -125,34 +135,44 @@ async def get_agent(
 
 @router.post("/execute", response_model=AgentResponse)
 async def execute_task(
-    request: AgentRequest,
+    agent_request: AgentRequest,
+    request: Request,
     registry: AgentRegistry = Depends(get_registry)
 ):
     """Execute a task on an available agent."""
     try:
+        bootstrap = get_bootstrap(request)
+        
         # Find available agent
-        agent = await registry.find_available_agent(request.agent_type)
+        agent = await registry.find_available_agent(agent_request.agent_type)
         if not agent:
             raise HTTPException(
                 status_code=503, 
-                detail=f"No available agents of type {request.agent_type}"
+                detail=f"No available agents of type {agent_request.agent_type}"
             )
         
-        # Get agent instance
-        agent_instance = _agent_instances.get(agent.agent_id)
+        # Get agent instance from bootstrap
+        agent_instance = bootstrap.get_agent_instance(agent.agent_id)
         if not agent_instance:
-            raise HTTPException(status_code=500, detail="Agent instance not found")
+            logger.warning(f"Agent instance {agent.agent_id} not found in bootstrap, attempting recovery...")
+            
+            # Try to recover the agent instance
+            await bootstrap.recover_agent_instances()
+            agent_instance = bootstrap.get_agent_instance(agent.agent_id)
+            
+            if not agent_instance:
+                raise HTTPException(status_code=500, detail="Agent instance not found and could not be recovered")
         
         # Update load before execution
         await registry.update_agent_load(agent.agent_id, agent.current_load + 1)
         
         try:
             # Execute task
-            response = await agent_instance.execute_request(request)
+            response = await agent_instance.execute_request(agent_request)
             return response
         finally:
             # Update load after execution
-            await registry.update_agent_load(agent.agent_id, agent.current_load)
+            await registry.update_agent_load(agent.agent_id, max(0, agent.current_load - 1))
         
     except HTTPException:
         raise
@@ -177,14 +197,52 @@ async def agent_heartbeat(
     except Exception as e:
         logger.error(f"Failed to update heartbeat for {agent_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/debug/instances")
+async def debug_agent_instances(request: Request):
+    """Debug agent instances in bootstrap."""
+    try:
+        bootstrap = get_bootstrap(request)
+        instances = bootstrap.agent_instances
+        
+        return {
+            "total_instances": len(instances),
+            "instance_ids": list(instances.keys()),
+            "instance_types": {
+                agent_id: type(instance).__name__ 
+                for agent_id, instance in instances.items()
+            }
+        }
+        
+    except Exception as e:
+        return {"error": str(e)}
+
+@router.post("/bootstrap/recover")
+async def recover_agents(request: Request):
+    """Manually trigger agent recovery."""
+    try:
+        bootstrap = get_bootstrap(request)
+        recovered = await bootstrap.recover_agent_instances()
+        
+        return {
+            "message": f"Recovered {len(recovered)} agent instances",
+            "recovered_agents": list(recovered.keys())
+        }
+        
+    except Exception as e:
+        logger.error(f"Manual agent recovery failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
     
 @router.get("/debug/{agent_id}")
 async def debug_agent(
     agent_id: str,
+    request: Request,
     registry: AgentRegistry = Depends(get_registry)
 ):
-    """Debug agent data in Redis."""
+    """Debug agent data in Redis and bootstrap."""
     try:
+        bootstrap = get_bootstrap(request)
+        
         # Get raw Redis data
         agent_key = f"agent:{agent_id}"
         raw_data = registry.redis_client.hgetall(agent_key)
@@ -192,11 +250,16 @@ async def debug_agent(
         # Try to parse it
         agent = await registry.get_agent(agent_id)
         
+        # Check if instance exists
+        instance_exists = bootstrap.get_agent_instance(agent_id) is not None
+        
         return {
             "agent_id": agent_id,
             "raw_redis_data": raw_data,
             "parsed_agent": agent.dict() if agent else None,
-            "agent_available": agent.status in [AgentStatus.IDLE, AgentStatus.BUSY] if agent else False
+            "agent_available": agent.status in [AgentStatus.IDLE, AgentStatus.BUSY] if agent else False,
+            "instance_exists": instance_exists,
+            "total_instances": len(bootstrap.agent_instances)
         }
         
     except Exception as e:
