@@ -4,6 +4,8 @@
 import asyncio
 import logging
 import httpx
+import json
+import re
 from typing import Dict, List, Optional, Any, Set
 from datetime import datetime, timedelta
 
@@ -114,7 +116,7 @@ class WorkflowEngine:
                 step_execution.end_time = datetime.utcnow()
                 return
             
-            # Prepare input data using input mapping
+            # Prepare input data using enhanced input mapping
             input_data = self._map_step_input(step, execution.context)
             step_execution.input_data = input_data
             
@@ -187,71 +189,207 @@ class WorkflowEngine:
         raise ValueError(f"Step execution not found for step_id: {step_id}")
     
     def _map_step_input(self, step: WorkflowStep, context: Dict[str, Any]) -> Dict[str, Any]:
-        """Map workflow context to step input using input_mapping."""
+        """Enhanced input mapping with support for literals and expressions."""
         mapped_input = {}
         
-        for step_input_key, context_key in step.input_mapping.items():
-            if context_key in context:
-                mapped_input[step_input_key] = context[context_key]
-            else:
-                logger.warning(f"Context key '{context_key}' not found for step input '{step_input_key}'")
+        for step_input_key, mapping_value in step.input_mapping.items():
+            mapped_input[step_input_key] = self._resolve_mapping_value(mapping_value, context)
         
         return mapped_input
+    
+    def _resolve_mapping_value(self, mapping_value: str, context: Dict[str, Any]) -> Any:
+        """Resolve a mapping value which can be a context key, literal, or expression."""
+        if not isinstance(mapping_value, str):
+            return mapping_value
+        
+        # Check for variable substitution patterns first
+        if '${' in mapping_value:
+            return self._substitute_variables(mapping_value, context)
+        
+        # Check for literal values (quoted strings)
+        if mapping_value.startswith('"') and mapping_value.endswith('"'):
+            return mapping_value[1:-1]  # Remove quotes
+        
+        if mapping_value.startswith("'") and mapping_value.endswith("'"):
+            return mapping_value[1:-1]  # Remove quotes
+        
+        # Check for numeric literals
+        if mapping_value.isdigit():
+            return int(mapping_value)
+        
+        try:
+            float_val = float(mapping_value)
+            return float_val
+        except ValueError:
+            pass
+        
+        # Check for boolean literals
+        if mapping_value.lower() == 'true':
+            return True
+        elif mapping_value.lower() == 'false':
+            return False
+        elif mapping_value.lower() == 'null' or mapping_value.lower() == 'none':
+            return None
+        
+        # Check for JSON literals (objects/arrays)
+        if mapping_value.startswith('{') or mapping_value.startswith('['):
+            try:
+                return json.loads(mapping_value)
+            except json.JSONDecodeError:
+                pass
+        
+        # Check for dot notation like step1.output.sentiment
+        if '.' in mapping_value:
+            return self._resolve_dot_notation(mapping_value, context)
+        
+        # Default: treat as context key
+        if mapping_value in context:
+            return context[mapping_value]
+        else:
+            logger.warning(f"Context key '{mapping_value}' not found, using as literal value")
+            return mapping_value
+    
+    def _resolve_dot_notation(self, path: str, context: Dict[str, Any]) -> Any:
+        """Resolve dot notation paths like 'step1.output.sentiment'."""
+        try:
+            parts = path.split('.')
+            current = context
+            
+            for part in parts:
+                if isinstance(current, dict):
+                    current = current.get(part)
+                else:
+                    return None
+                    
+                if current is None:
+                    break
+            
+            return current
+        except Exception as e:
+            logger.warning(f"Failed to resolve dot notation '{path}': {str(e)}")
+            return None
     
     def _map_step_output(self, step: WorkflowStep, step_output: Dict[str, Any], context: Dict[str, Any]):
         """Map step output to workflow context using output_mapping."""
         for step_output_key, context_key in step.output_mapping.items():
             if step_output_key in step_output:
-                context[context_key] = step_output[step_output_key]
+                # Support dot notation for nested output
+                self._set_nested_value(context, context_key, step_output[step_output_key])
             else:
                 logger.warning(f"Step output key '{step_output_key}' not found for context key '{context_key}'")
     
+    def _set_nested_value(self, context: Dict[str, Any], path: str, value: Any):
+        """Set nested value in context using dot notation."""
+        if '.' not in path:
+            context[path] = value
+            return
+        
+        parts = path.split('.')
+        current = context
+        
+        # Navigate to the parent of the target key
+        for part in parts[:-1]:
+            if part not in current:
+                current[part] = {}
+            elif not isinstance(current[part], dict):
+                # Overwrite non-dict values
+                current[part] = {}
+            current = current[part]
+        
+        # Set the final value
+        current[parts[-1]] = value
+    
     def _evaluate_condition(self, condition: str, context: Dict[str, Any]) -> bool:
-        """Evaluate a simple condition against the workflow context."""
-        # Simple condition evaluation (expand as needed)
-        # Format: "key operator value" e.g., "sentiment == positive"
+        """Enhanced condition evaluation with support for expressions."""
         try:
+            logger.info(f"Evaluating condition: '{condition}' with context keys: {list(context.keys())}")
+            
+            # Support for ${variable} syntax
+            original_condition = condition
+            condition = self._substitute_variables(condition, context)
+            logger.info(f"After variable substitution: '{condition}'")
+            
+            # Simple condition evaluation
+            # Format: "key operator value" e.g., "sentiment == positive"
+            condition = condition.strip()
+            
+            # Handle complex conditions with parentheses and logical operators
+            if any(op in condition for op in [' and ', ' or ', ' not ']):
+                return self._evaluate_complex_condition(condition, context)
+            
+            # Simple condition
             parts = condition.split()
             if len(parts) != 3:
-                logger.warning(f"Invalid condition format: {condition}")
+                logger.warning(f"Invalid condition format: '{condition}' (original: '{original_condition}')")
                 return True
             
-            key, operator, value = parts
-            context_value = context.get(key)
+            left, operator, right = parts
+            left_value = self._resolve_mapping_value(left, context)
+            right_value = self._resolve_mapping_value(right, context)
             
-            if context_value is None:
-                return False
-            
-            # Convert value to appropriate type
-            if value.lower() == 'true':
-                value = True
-            elif value.lower() == 'false':
-                value = False
-            elif value.isdigit():
-                value = int(value)
-            elif value.replace('.', '').isdigit():
-                value = float(value)
+            logger.info(f"Comparing: {left_value} ({type(left_value)}) {operator} {right_value} ({type(right_value)})")
             
             # Evaluate condition
+            result = False
             if operator == "==":
-                return context_value == value
+                result = left_value == right_value
             elif operator == "!=":
-                return context_value != value
+                result = left_value != right_value
             elif operator == ">":
-                return float(context_value) > float(value)
+                result = float(left_value) > float(right_value)
             elif operator == "<":
-                return float(context_value) < float(value)
+                result = float(left_value) < float(right_value)
             elif operator == ">=":
-                return float(context_value) >= float(value)
+                result = float(left_value) >= float(right_value)
             elif operator == "<=":
-                return float(context_value) <= float(value)
+                result = float(left_value) <= float(right_value)
+            elif operator == "in":
+                result = left_value in right_value
+            elif operator == "contains":
+                result = right_value in left_value
             else:
                 logger.warning(f"Unknown operator in condition: {operator}")
-                return True
+                result = True
+            
+            logger.info(f"Condition result: {result}")
+            return result
                 
         except Exception as e:
             logger.error(f"Error evaluating condition '{condition}': {str(e)}")
             return True  # Default to true on error
+    
+    def _substitute_variables(self, text: str, context: Dict[str, Any]) -> str:
+        """Substitute ${variable} patterns with context values."""
+        def replace_var(match):
+            var_path = match.group(1)
+            value = self._resolve_dot_notation(var_path, context)
+            return str(value) if value is not None else f"MISSING({var_path})"
+        
+        return re.sub(r'\$\{([^}]+)\}', replace_var, text)
+    
+    def _evaluate_complex_condition(self, condition: str, context: Dict[str, Any]) -> bool:
+        """Evaluate complex conditions with logical operators."""
+        # This is a simplified implementation
+        # For production, consider using a proper expression parser
+        
+        try:
+            # Replace variables
+            condition = self._substitute_variables(condition, context)
+            
+            # Basic safety check - only allow specific keywords
+            allowed_keywords = ['and', 'or', 'not', 'True', 'False', '==', '!=', '>', '<', '>=', '<=']
+            
+            # Simple evaluation using eval (DANGEROUS in production - use proper parser)
+            # This is just for PoC - implement proper expression evaluation for production
+            if all(word.isalnum() or word in allowed_keywords or word in '()"\' ' for word in condition):
+                return eval(condition)
+            else:
+                logger.warning(f"Complex condition contains unsafe characters: {condition}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Error evaluating complex condition '{condition}': {str(e)}")
+            return True
     
     async def start_workflow_execution(self, workflow_def: WorkflowDefinition, 
                                      execution: WorkflowExecution):
