@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Orchestration Platform</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/components.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <button class="sidebar-toggle" id="sidebarToggle">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </button>
+                <h1 class="logo">AI Orchestration Platform</h1>
+            </div>
+            <div class="header-right">
+                <div class="status-indicator">
+                    <div class="status-dot"></div>
+                    <span>System Online</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <nav class="sidebar-nav">
+                <a href="#dashboard" class="nav-item active" data-page="dashboard">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                        <line x1="9" y1="9" x2="15" y2="9"/>
+                        <line x1="9" y1="15" x2="15" y2="15"/>
+                    </svg>
+                    <span class="nav-text">Dashboard</span>
+                </a>
+                <a href="#workflows" class="nav-item" data-page="workflows">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                        <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+                    </svg>
+                    <span class="nav-text">Workflows</span>
+                </a>
+                <a href="#agents" class="nav-item" data-page="agents">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                        <circle cx="9" cy="7" r="4"/>
+                        <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                        <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                    </svg>
+                    <span class="nav-text">Agents</span>
+                </a>
+                <a href="#monitoring" class="nav-item" data-page="monitoring">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                        <path d="M3 3v18h18"/>
+                        <path d="M18.7 8l-5.1 5.2-2.8-2.7L7 14.3"/>
+                    </svg>
+                    <span class="nav-text">Monitoring</span>
+                </a>
+            </nav>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content" id="mainContent">
+            <!-- Dashboard Page -->
+            <div class="page" id="dashboard-page">
+                <div class="page-header">
+                    <h2>Dashboard Overview</h2>
+                    <button class="refresh-btn" id="refreshBtn">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <polyline points="23 4 23 10 17 10"/>
+                            <polyline points="1 20 1 14 7 14"/>
+                            <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
+                        </svg>
+                        Refresh
+                    </button>
+                </div>
+
+                <div class="metrics-grid" id="metricsGrid">
+                    <!-- Overview cards will be populated by JS -->
+                </div>
+
+                <div class="dashboard-grid">
+                    <div class="card">
+                        <h3>Service Status</h3>
+                        <div class="service-list" id="serviceList">
+                            <!-- Service status will be populated by JS -->
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h3>Recent Activity</h3>
+                        <div class="activity-list" id="activityList">
+                            <!-- Recent activity will be populated by JS -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Workflows Page -->
+            <div class="page" id="workflows-page" style="display: none;">
+                <div class="page-header">
+                    <h2>Workflows</h2>
+                    <button class="primary-btn" id="createWorkflowBtn">Create Workflow</button>
+                </div>
+                <div class="workflows-grid" id="workflowsGrid">
+                    <!-- Workflows will be populated by JS -->
+                </div>
+            </div>
+
+            <!-- Agents Page -->
+            <div class="page" id="agents-page" style="display: none;">
+                <div class="page-header">
+                    <h2>AI Agents</h2>
+                </div>
+                <div class="agents-grid" id="agentsGrid">
+                    <!-- Agents will be populated by JS -->
+                </div>
+            </div>
+
+            <!-- Monitoring Page -->
+            <div class="page" id="monitoring-page" style="display: none;">
+                <div class="page-header">
+                    <h2>System Monitoring</h2>
+                </div>
+                <div class="monitoring-grid">
+                    <div class="card">
+                        <h3>Performance Metrics</h3>
+                        <canvas id="metricsChart" width="400" height="200"></canvas>
+                    </div>
+                    <div class="card">
+                        <h3>System Counters</h3>
+                        <div id="countersView">
+                            <!-- Counters will be populated by JS -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Create Workflow Modal -->
+        <div class="modal" id="createWorkflowModal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Create New Workflow</h3>
+                    <button class="close-btn" id="closeModalBtn">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <form id="workflowForm">
+                        <div class="form-group">
+                            <label>Workflow Name</label>
+                            <input type="text" id="workflowName" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Description</label>
+                            <textarea id="workflowDescription"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label>Workflow JSON</label>
+                            <textarea id="workflowJson" placeholder="Enter workflow definition JSON..." rows="10"></textarea>
+                        </div>
+                        <div class="form-actions">
+                            <button type="button" class="secondary-btn" id="cancelBtn">Cancel</button>
+                            <button type="submit" class="primary-btn">Create Workflow</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/api.js"></script>
+    <script src="js/utils/router.js"></script>
+    <script src="js/components/dashboard.js"></script>
+    <script src="js/components/workflows.js"></script>
+    <script src="js/components/agents.js"></script>
+    <script src="js/components/monitoring.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

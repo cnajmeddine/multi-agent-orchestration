@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 import httpx
 import json
 from collections import defaultdict, deque
+from fastapi.middleware.cors import CORSMiddleware
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -20,6 +21,15 @@ app = FastAPI(
     title="AI Workflow Monitoring Service",
     description="Real-time monitoring, metrics, and alerting for AI workflows",
     version="1.0.0"
+)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Models
