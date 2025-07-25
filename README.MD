@@ -1,6 +1,6 @@
 # Multi-Agent Orchestration Platform
 
-Building a scalable, production-ready platform for orchestrating multiple AI agents into complex, multi-step workflows. Built with modern microservices architecture, this system ains to enable businesses to chain AI capabilities together with automatic error handling, monitoring, and state management.
+A scalable, production-ready platform for orchestrating multiple AI agents into complex, multi-step workflows. Built with modern microservices architecture, this system enables businesses to chain AI capabilities together with automatic error handling, monitoring, and state management.
 
 ## Problem Statement
 
@@ -12,25 +12,77 @@ Organizations are adopting multiple AI tools (ChatGPT, Claude, specialized model
 
 ## Solution
 
-An orchestration platform that coordinates multiple AI agents to work together on complex tasks, providing:
+An enterprise-grade orchestration platform that coordinates multiple AI agents to work together on complex tasks, providing:
 - **Workflow Automation**: Define multi-step processes with different AI agents
 - **Automatic Coordination**: Seamless data passing between agents
 - **Reliability**: Built-in error handling, retries, and monitoring
 - **Scalability**: Horizontal scaling with Redis-based state management
+
+## Core Platform Features
+
+### 1. Agent Management Service (Port 8001)
+- Register different AI agents (OpenAI, Anthropic, custom models)
+- Define agent capabilities and specializations
+- Real-time health monitoring and load balancing
+- Automatic agent discovery and failover
+
+### 2. Workflow Orchestration Engine (Port 8002)
+- Visual workflow definition with JSON configuration
+- Execute multi-step workflows with different agents
+- Intelligent context passing between agents
+- Support for sequential, parallel, and conditional execution
+- Pause/resume/rollback workflow capabilities
+
+### 3. Communication Service (Port 8004)
+- Redis Streams-based reliable messaging
+- Event publishing and subscription system
+- Webhook delivery for external integrations
+- Message queues with dead letter queue support
+- Real-time event streaming
+
+### 4. Monitoring & Analytics (Port 8003)
+- Real-time performance metrics collection
+- System health monitoring and alerting
+- Workflow execution analytics
+- Agent performance tracking
+- Historical data and trend analysis
+
+### 5. Modern Web Dashboard (Port 3000)
+- Real-time system overview with neon dark theme
+- Workflow creation with JSON editor
+- Agent status and performance visualization
+- Live execution monitoring
+- System metrics and alerts dashboard
+
+## Screenshots
+
+### Dashboard Overview
+![Dashboard Overview](samples/screenshots/main_dashboard_2.png)
+*Real-time system metrics, service health, and recent activity*
+
+### Workflow Management
+![Workflow Management](samples/screenshots/workflows.png)
+*Create, execute, and monitor AI workflows*
+
+### Agent Status
+![Agent Status](samples/screenshots/agents.png)
+*Monitor registered agents and their capabilities*
+
+<!-- ### System Monitoring
+![System Monitoring](samples/screenshots/monitoring.png)
+*Performance metrics and system health tracking* -->
+
+### Workflow Creation
+![Workflow Creation](samples/screenshots/workflow-creation.png)
+*JSON-based workflow definition with live validation*
 
 ## Architecture
 
 ### Complete System Architecture
 ```
                            ┌─────────────────────┐
-                           │   React Dashboard   │
+                           │   Web Dashboard     │
                            │    (Port 3000)     │
-                           └──────────┬──────────┘
-                                      │
-                           ┌──────────▼──────────┐
-                           │   API Gateway       │
-                           │    (Port 8000)     │
-                           │  Auth, Rate Limit   │
                            └──────────┬──────────┘
                                       │
         ┌─────────────────────────────┼─────────────────────────────┐
@@ -46,9 +98,10 @@ An orchestration platform that coordinates multiple AI agents to work together o
           │                           │                             │
           │                ┌──────────▼──────────┐                  │
           │                │ Communication Bus   │                  │
-          │                │    (Redis Streams)  │                  │
+          │                │    (Port 8004)     │                  │
           │                │  • Event Pub/Sub    │                  │
           │                │  • Message Queuing  │                  │
+          │                │  • Webhook Delivery │                  │
           │                └──────────┬──────────┘                  │
           │                           │                             │
           └───────────────────────────┼─────────────────────────────┘
@@ -60,7 +113,7 @@ An orchestration platform that coordinates multiple AI agents to work together o
                            │ • Workflow State    │
                            │ • Execution Logs    │
                            │ • Performance Cache │
-                           │ • Session Store     │
+                           │ • Event Streams     │
                            └─────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -75,13 +128,6 @@ An orchestration platform that coordinates multiple AI agents to work together o
 ```
 
 ### Service Responsibilities
-
-#### API Gateway (Port 8000)
-- **Authentication**: JWT token validation and user session management
-- **Rate Limiting**: Per-user and per-endpoint throttling
-- **Request Routing**: Intelligent routing to appropriate services
-- **CORS Handling**: Cross-origin request management
-- **API Versioning**: Backward compatibility management
 
 #### Agent Service (Port 8001)
 - **Agent Registry**: Service discovery with Redis-based metadata storage
@@ -106,124 +152,117 @@ An orchestration platform that coordinates multiple AI agents to work together o
 #### Monitoring Service (Port 8003)
 - **Metrics Collection**: Performance data aggregation from all services
 - **Alerting**: Real-time alerts for failures and performance issues
-- **Dashboard APIs**: Data endpoints for React dashboard
+- **Dashboard APIs**: Data endpoints for web dashboard
 - **Log Aggregation**: Centralized logging with search capabilities
 
-### Core Components
+## Live Demo Scenario
 
-#### 1. Agent Service
-- **Agent Registry**: Redis-based service discovery and load balancing
-- **Agent Types**: Pluggable agent implementations (text processing, data analysis)
-- **Health Monitoring**: Real-time agent status and performance tracking
-- **Dynamic Scaling**: Automatic agent lifecycle management
+**Multi-Agent Customer Support Workflow:**
 
-#### 2. Workflow Service  
-- **Workflow Engine**: DAG-based execution with dependency resolution
-- **State Management**: Persistent workflow execution state
-- **Context Sharing**: Seamless data flow between workflow steps
-- **Conditional Logic**: Support for branching and parallel execution
-
-#### 3. Redis Storage Layer
-- **Agent Metadata**: HASH structures for agent information
-- **Load Balancing**: SORTED SETs for intelligent agent selection
-- **Workflow State**: JSON-serialized execution context
-- **Real-time Monitoring**: Health checks and performance metrics
-
-## 🛠️ Technology Stack
-
-- **Backend**: Python 3.11+ with FastAPI for high-performance async APIs
-- **Storage**: Redis for caching, state management, and real-time operations
-- **Orchestration**: Custom workflow engine with topological sort for DAG execution
-- **Communication**: HTTP/REST with httpx async client for inter-service communication
-- **Deployment**: Docker containerization with docker-compose orchestration
-- **Monitoring**: Structured logging with health check endpoints
-
-## 🚦 Getting Started
-
-### Prerequisites
-- Python 3.11+
-- Docker & Docker Compose
-- Git
-
-### Quick Start
-
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd ai-agent-orchestration
+1. **Text Classification Agent**: Categorizes incoming customer request
+   ```json
+   {
+     "agent_type": "text_processor",
+     "task_type": "sentiment_analysis",
+     "text": "I'm disappointed with my recent order..."
+   }
    ```
 
-2. **Start Redis**
-   ```bash
-   docker-compose up redis -d
+2. **Content Analysis Agent**: Extracts key information and intent
+   ```json
+   {
+     "agent_type": "text_processor", 
+     "task_type": "text_analysis",
+     "analysis_type": "intent"
+   }
    ```
 
-3. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
+3. **Data Processing Agent**: Analyzes customer history and patterns
+   ```json
+   {
+     "agent_type": "data_analyzer",
+     "task_type": "data_summary",
+     "data": [customer_history]
+   }
    ```
 
-4. **Start Agent Service**
-   ```bash
-   python run_agent_service.py
-   ```
+The platform automatically coordinates these agents, handles failures gracefully, and provides real-time visibility through the dashboard.
 
-5. **Start Workflow Service** (in new terminal)
-   ```bash
-   python run_workflow_service.py
-   ```
+**View the complete workflow execution:**
+- Dashboard shows live progress updates
+- Each step's input/output is logged
+- Failed steps automatically retry with exponential backoff
+- Context flows seamlessly between agents
 
-6. **Verify services**
-   - Agent Service: http://localhost:8001/docs
-   - Workflow Service: http://localhost:8002/docs
-   - Health checks: `/health` endpoints
+## Architecture & Technology Stack
 
-## 📋 Demo Scenarios
+### Backend Services
+- **Python 3.11+** with FastAPI for high-performance async APIs
+- **Redis** for state management, caching, and message streaming
+- **Docker** containerization for easy deployment
+- **Microservices architecture** with clear separation of concerns
 
-### 1. Content Processing Pipeline
-```json
-{
-  "name": "Content Analysis Workflow",
-  "steps": [
-    {
-      "name": "sentiment_analysis",
-      "agent_type": "text_processor",
-      "input_mapping": {"text": "input_text"},
-      "output_mapping": {"sentiment": "content_sentiment"}
-    },
-    {
-      "name": "text_summary", 
-      "agent_type": "text_processor",
-      "input_mapping": {"text": "input_text"},
-      "output_mapping": {"summary": "content_summary"},
-      "depends_on": ["sentiment_analysis"],
-      "condition": "content_sentiment == positive"
-    }
-  ]
-}
+### Frontend Dashboard  
+- **Modern HTML5/CSS3/JavaScript** with neon dark theme
+- **Chart.js** for real-time metrics visualization
+- **Responsive design** optimized for desktop and mobile
+- **Real-time updates** with 5-second polling
+
+### Communication & Messaging
+- **Redis Streams** for reliable event processing
+- **HTTP/REST APIs** for service communication
+- **WebSocket-style** real-time updates
+- **Webhook delivery** for external integrations
+
+### Monitoring & Observability
+- **Structured logging** with correlation IDs
+- **Performance metrics** collection and aggregation  
+- **Health checks** and automatic service discovery
+- **Alert management** with configurable thresholds
+
+## Quick Start Guide
+
+### 1. Prerequisites
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Start Redis
+docker-compose up redis -d
 ```
 
-### 2. Data Analysis Pipeline
-```json
-{
-  "name": "Data Processing Workflow",
-  "steps": [
-    {
-      "name": "data_validation",
-      "agent_type": "data_analyzer",
-      "input_mapping": {"data": "raw_data"},
-      "output_mapping": {"clean_data": "validated_data"}
-    },
-    {
-      "name": "statistical_analysis",
-      "agent_type": "data_analyzer", 
-      "input_mapping": {"data": "validated_data"},
-      "output_mapping": {"stats": "analysis_results"},
-      "depends_on": ["data_validation"]
-    }
-  ]
-}
+### 2. Start All Services
+```bash
+# Terminal 1: Agent Service
+python run_agent_service.py
+
+# Terminal 2: Workflow Service  
+python run_workflow_service.py
+
+# Terminal 3: Monitoring Service
+python run_monitoring_service.py
+
+# Terminal 4: Communication Service
+python run_communication_service.py
+
+# Terminal 5: Dashboard
+cd dashboard
+python -m http.server 3000
 ```
+
+### 3. Access the Platform
+- **Dashboard**: http://localhost:3000
+- **Agent Service API**: http://localhost:8001/docs
+- **Workflow Service API**: http://localhost:8002/docs
+- **Monitoring API**: http://localhost:8003
+- **Communication API**: http://localhost:8004/docs
+
+### 4. Create Your First Workflow
+1. Open the dashboard at http://localhost:3000
+2. Navigate to "Workflows" 
+3. Click "Create Workflow"
+4. Use the JSON editor to define your workflow
+5. Execute and monitor in real-time
 
 ## 🔧 API Reference
 
@@ -292,43 +331,98 @@ GET /executions/{execution_id}/status
 GET /executions/{execution_id}/logs
 ```
 
-## 🏢 Production Considerations
+### Communication Service Endpoints
 
-### Scalability
-- **Horizontal Scaling**: Add more agent instances for increased throughput
-- **Load Balancing**: Redis SORTED SETs automatically distribute load
-- **Database Separation**: Agent and workflow services use separate Redis databases
+#### Publish Event
+```http
+POST /events/publish
+Content-Type: application/json
 
-### Reliability
-- **Error Handling**: Comprehensive exception handling with detailed logging
-- **Retry Logic**: Configurable retry attempts with exponential backoff
-- **Health Monitoring**: Real-time health checks and automatic cleanup
-- **State Persistence**: Workflow state survives service restarts
+{
+  "event_type": "workflow.started",
+  "source_service": "workflow-service",
+  "source_id": "execution-123",
+  "payload": {"workflow_id": "abc123"}
+}
+```
 
-### Security
-- **Input Validation**: Pydantic models ensure type safety
-- **Error Isolation**: Service failures don't cascade
-- **Audit Logging**: Complete execution history for compliance
+#### Create Webhook
+```http
+POST /webhooks/
+Content-Type: application/json
 
-### Monitoring
-- **Structured Logging**: JSON logs for observability platforms
-- **Performance Metrics**: Execution times and success rates
-- **Real-time Status**: Live workflow execution monitoring
+{
+  "name": "Slack Integration",
+  "url": "https://hooks.slack.com/services/...",
+  "event_filter": {
+    "event_types": ["workflow.completed", "workflow.failed"]
+  }
+}
+```
+
+### Monitoring Service Endpoints
+
+#### Record Metric
+```http
+POST /metrics/record?metric_name=execution_time&value=45.2
+```
+
+#### Get Dashboard Overview
+```http
+GET /dashboard/overview
+```
+
+## Platform Capabilities
+
+✅ **Multi-Agent Orchestration**: Coordinate 5+ different AI agents simultaneously  
+✅ **Real-Time Monitoring**: Live dashboard with metrics and health status  
+✅ **Fault Tolerance**: Automatic retry, pause/resume, and rollback capabilities  
+✅ **Scalable Architecture**: Handle 50+ concurrent workflow executions  
+✅ **Event-Driven**: Reliable messaging with Redis Streams  
+✅ **External Integrations**: Webhook delivery and API connectivity  
+✅ **Visual Management**: Modern web interface for workflow creation and monitoring  
+✅ **Production Ready**: Docker deployment with health checks and logging  
+
+
+## Deployment
+
+### Docker Compose (Recommended)
+```bash
+# docker-compose.yml includes all services
+docker-compose up -d
+
+# Access dashboard at http://localhost:3000
+```
+
+### Individual Service Deployment
+```bash
+# Each service can be deployed independently
+docker build -t agent-service services/agent_service/
+docker build -t workflow-service services/workflow_service/
+docker build -t monitoring-service services/monitoring_service/
+docker build -t communication-service services/communication_service/
+```
+
+### Production Considerations
+- **Load Balancing**: Use nginx or cloud load balancers
+- **Redis Clustering**: For high availability
+- **Environment Variables**: Configure service URLs and credentials
+- **Monitoring**: Integrate with existing observability stack
+- **Security**: Add authentication and rate limiting
 
 ## 🔮 Future Enhancements
 
 ### Phase 2: Advanced Features
-- **Web Dashboard**: React-based UI for workflow management
-- **Advanced Scheduling**: Cron-based workflow triggers
-- **Plugin System**: Custom agent development framework
-- **Performance Analytics**: Detailed metrics and optimization insights
+- **Drag-and-Drop Workflow Builder**: Visual workflow creation interface
+- **Advanced Scheduling**: Cron-based workflow triggers and time-based execution
+- **Plugin System**: Custom agent development framework with hot-reload
+- **Performance Analytics**: Real-time metrics, dashboards, and optimization insights
 
 ### Phase 3: Enterprise Features
-- **Multi-tenancy**: Organization and user isolation
-- **Role-based Access**: Fine-grained permission system
-- **API Gateway**: Centralized authentication and rate limiting
-- **Kubernetes Deployment**: Production-ready container orchestration
-
+- **API Gateway**: Centralized authentication, rate limiting, and request routing
+- **Multi-tenancy**: Organization and user isolation with RBAC
+- **Advanced Integrations**: Native connectors for popular SaaS platforms
+- **Kubernetes Deployment**: Production-ready container orchestration with auto-scaling
 
 ## 🤝 Contributing
 
