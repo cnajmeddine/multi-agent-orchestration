@@ -12,6 +12,7 @@ from ..models import (
 from ..agent_registry import AgentRegistry
 from ..agent_types.text_agent import TextProcessingAgent
 from ..agent_types.analysis_agent import DataAnalysisAgent
+from ..event_publisher import event_publisher
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/agents", tags=["agents"])
@@ -63,6 +64,7 @@ async def register_agent(
         bootstrap.add_agent_instance(agent_metadata.agent_id, agent_instance)
         
         logger.info(f"Successfully registered agent {agent_metadata.agent_id}")
+        await event_publisher.publish_agent_registered(agent_metadata)
         return agent_metadata
         
     except Exception as e:
@@ -85,7 +87,8 @@ async def unregister_agent(
         
         # Remove from bootstrap
         bootstrap.remove_agent_instance(agent_id)
-        
+
+        await event_publisher.publish_agent_unregistered(agent_id)
         return {"message": f"Agent {agent_id} unregistered successfully"}
         
     except Exception as e:
@@ -169,6 +172,16 @@ async def execute_task(
         try:
             # Execute task
             response = await agent_instance.execute_request(agent_request)
+
+            # Publish task execution event
+            await event_publisher.publish_task_executed(
+                agent.agent_id,
+                agent_request.task_id,
+                response.execution_time,
+                response.success,
+                response.error_message
+            )
+
             return response
         finally:
             # Update load after execution
@@ -191,6 +204,14 @@ async def agent_heartbeat(
         success = await registry.heartbeat(agent_id, health_data)
         if not success:
             raise HTTPException(status_code=404, detail="Agent not found")
+
+        agent = await registry.get_agent(agent_id)  # Get agent for max_tasks
+        await event_publisher.publish_health_status(
+            agent_id,
+            health_data.status.value,
+            health_data.current_load,
+            agent.max_concurrent_tasks if agent else 1
+        )
         
         return {"message": "Heartbeat updated successfully"}
         

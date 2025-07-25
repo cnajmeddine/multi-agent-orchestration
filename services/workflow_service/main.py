@@ -60,7 +60,10 @@ async def lifespan(app: FastAPI):
     
     # Test Agent Service connection
     try:
-        workflow_engine = WorkflowEngine()
+        # workflow_engine = WorkflowEngine()
+        from .workflow_engine import EventIntegratedWorkflowEngine
+        workflow_engine = EventIntegratedWorkflowEngine()
+
         response = await workflow_engine.agent_client.get("/health")
         if response.status_code == 200:
             logger.info("Agent service connection established")
