@@ -1,5 +1,5 @@
 # workflow_engine.py - Core execution engine for workflows
-# This file contains the logic for executing workflows step by step.
+# This file contains the logic for executing workflows step by step, with pause/resume/rollback
 
 import asyncio
 import logging
@@ -8,6 +8,9 @@ import json
 import re
 from typing import Dict, List, Optional, Any, Set
 from datetime import datetime, timedelta
+from enum import Enum
+from pydantic import BaseModel, Field
+import uuid
 
 from .models import (
     WorkflowDefinition, WorkflowExecution, StepExecution, 
@@ -17,17 +20,209 @@ from .config import settings
 
 logger = logging.getLogger(__name__)
 
+class WorkflowAction(str, Enum):
+    PAUSE = "pause"
+    RESUME = "resume"
+    ROLLBACK = "rollback"
+    CANCEL = "cancel"
+
+class CheckpointType(str, Enum):
+    STEP_START = "step_start"
+    STEP_COMPLETE = "step_complete"
+    WORKFLOW_START = "workflow_start"
+
+class WorkflowCheckpoint(BaseModel):
+    checkpoint_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    execution_id: str
+    checkpoint_type: CheckpointType
+    step_id: Optional[str] = None
+    context_snapshot: Dict[str, Any]
+    step_states: Dict[str, StepStatus]
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
 class WorkflowEngine:
+    """Enhanced workflow engine with pause/resume, rollback + all original functionality."""
+    
     def __init__(self):
         self.running_executions: Dict[str, asyncio.Task] = {}
         self.agent_client = httpx.AsyncClient(base_url=settings.agent_service_url)
+        
+        # Enhanced functionality
+        self.paused_executions: Set[str] = set()
+        self.checkpoints: Dict[str, List[WorkflowCheckpoint]] = {}
+        self.rollback_handlers: Dict[str, callable] = {}
+    
+    # =========================
+    # PAUSE/RESUME/ROLLBACK FUNCTIONALITY
+    # =========================
+    
+    async def pause_workflow(self, execution_id: str) -> bool:
+        """Pause a running workflow execution."""
+        try:
+            if execution_id not in self.running_executions:
+                logger.warning(f"Cannot pause - execution {execution_id} not running")
+                return False
+            
+            self.paused_executions.add(execution_id)
+            logger.info(f"Paused workflow execution {execution_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to pause execution {execution_id}: {str(e)}")
+            return False
+    
+    async def resume_workflow(self, execution_id: str) -> bool:
+        """Resume a paused workflow execution."""
+        try:
+            if execution_id not in self.paused_executions:
+                logger.warning(f"Cannot resume - execution {execution_id} not paused")
+                return False
+            
+            self.paused_executions.remove(execution_id)
+            logger.info(f"Resumed workflow execution {execution_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to resume execution {execution_id}: {str(e)}")
+            return False
+    
+    async def rollback_to_checkpoint(self, execution_id: str, checkpoint_id: str) -> bool:
+        """Rollback workflow to a specific checkpoint."""
+        try:
+            if execution_id not in self.checkpoints:
+                logger.error(f"No checkpoints found for execution {execution_id}")
+                return False
+            
+            # Find the checkpoint
+            checkpoint = None
+            for cp in self.checkpoints[execution_id]:
+                if cp.checkpoint_id == checkpoint_id:
+                    checkpoint = cp
+                    break
+            
+            if not checkpoint:
+                logger.error(f"Checkpoint {checkpoint_id} not found")
+                return False
+            
+            # Get current execution
+            from .workflow_registry import WorkflowRegistry
+            registry = WorkflowRegistry()
+            execution = await registry.get_workflow_execution(execution_id)
+            
+            if not execution:
+                logger.error(f"Execution {execution_id} not found")
+                return False
+            
+            # Restore context and step states
+            execution.context = checkpoint.context_snapshot.copy()
+            
+            # Reset step states
+            for step_exec in execution.step_executions:
+                if step_exec.step_id in checkpoint.step_states:
+                    target_status = checkpoint.step_states[step_exec.step_id]
+                    
+                    # Call rollback handler if step was completed
+                    if (step_exec.status == StepStatus.COMPLETED and 
+                        target_status != StepStatus.COMPLETED):
+                        await self._handle_step_rollback(step_exec)
+                    
+                    step_exec.status = target_status
+                    if target_status == StepStatus.PENDING:
+                        step_exec.start_time = None
+                        step_exec.end_time = None
+                        step_exec.output_data = None
+                        step_exec.error_message = None
+            
+            # Update execution status
+            execution.status = WorkflowStatus.RUNNING
+            await registry.store_workflow_execution(execution)
+            
+            logger.info(f"Rolled back execution {execution_id} to checkpoint {checkpoint_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to rollback execution {execution_id}: {str(e)}")
+            return False
+    
+    async def create_checkpoint(self, execution_id: str, checkpoint_type: CheckpointType, 
+                              step_id: Optional[str] = None) -> str:
+        """Create a checkpoint for the current workflow state."""
+        try:
+            from .workflow_registry import WorkflowRegistry
+            registry = WorkflowRegistry()
+            execution = await registry.get_workflow_execution(execution_id)
+            
+            if not execution:
+                raise ValueError(f"Execution {execution_id} not found")
+            
+            # Create step states snapshot
+            step_states = {
+                step_exec.step_id: step_exec.status 
+                for step_exec in execution.step_executions
+            }
+            
+            checkpoint = WorkflowCheckpoint(
+                execution_id=execution_id,
+                checkpoint_type=checkpoint_type,
+                step_id=step_id,
+                context_snapshot=execution.context.copy(),
+                step_states=step_states
+            )
+            
+            # Store checkpoint
+            if execution_id not in self.checkpoints:
+                self.checkpoints[execution_id] = []
+            
+            self.checkpoints[execution_id].append(checkpoint)
+            
+            # Keep only last 10 checkpoints
+            self.checkpoints[execution_id] = self.checkpoints[execution_id][-10:]
+            
+            logger.info(f"Created checkpoint {checkpoint.checkpoint_id} for execution {execution_id}")
+            return checkpoint.checkpoint_id
+            
+        except Exception as e:
+            logger.error(f"Failed to create checkpoint: {str(e)}")
+            raise
+    
+    async def _handle_step_rollback(self, step_execution: StepExecution):
+        """Handle rollback for a specific step."""
+        try:
+            step_id = step_execution.step_id
+            
+            # Check if there's a custom rollback handler
+            if step_id in self.rollback_handlers:
+                handler = self.rollback_handlers[step_id]
+                await handler(step_execution)
+            else:
+                # Default rollback: just log
+                logger.info(f"Rolling back step {step_id} (no custom handler)")
+            
+        except Exception as e:
+            logger.error(f"Step rollback failed for {step_execution.step_id}: {str(e)}")
+    
+    def register_rollback_handler(self, step_id: str, handler: callable):
+        """Register a custom rollback handler for a step."""
+        self.rollback_handlers[step_id] = handler
+        logger.info(f"Registered rollback handler for step {step_id}")
+    
+    async def get_execution_checkpoints(self, execution_id: str) -> List[WorkflowCheckpoint]:
+        """Get all checkpoints for an execution."""
+        return self.checkpoints.get(execution_id, [])
+    
+    # =========================
+    # ALL ORIGINAL FUNCTIONALITY PRESERVED
+    # =========================
     
     async def execute_workflow(self, workflow_def: WorkflowDefinition, 
                              execution: WorkflowExecution) -> WorkflowExecution:
-        """Execute a workflow definition."""
+        """Execute a workflow definition with enhancements."""
         logger.info(f"Starting workflow execution {execution.execution_id}")
         
         try:
+            # Create initial checkpoint
+            await self.create_checkpoint(execution.execution_id, CheckpointType.WORKFLOW_START)
+            
             # Update execution status
             execution.status = WorkflowStatus.RUNNING
             execution.start_time = datetime.utcnow()
@@ -61,8 +256,8 @@ class WorkflowEngine:
                         step_execution = self._get_step_execution(execution, step.step_id)
                         
                         if step_execution.status == StepStatus.PENDING:
-                            # Execute step
-                            await self._execute_step(workflow_def, execution, step, step_execution)
+                            # Execute step with enhancements
+                            await self._execute_step_enhanced(workflow_def, execution, step, step_execution)
                             
                             if step_execution.status in [StepStatus.COMPLETED, StepStatus.FAILED, StepStatus.SKIPPED]:
                                 completed_steps.add(step.step_id)
@@ -99,11 +294,24 @@ class WorkflowEngine:
         
         return execution
     
-    async def _execute_step(self, workflow_def: WorkflowDefinition, 
-                          execution: WorkflowExecution, step: WorkflowStep, 
-                          step_execution: StepExecution):
-        """Execute a single workflow step."""
+    async def _execute_step_enhanced(self, workflow_def: WorkflowDefinition, 
+                                   execution: WorkflowExecution, step: WorkflowStep, 
+                                   step_execution: StepExecution):
+        """Execute a single workflow step with enhancements."""
         logger.info(f"Executing step {step.name} in workflow {execution.execution_id}")
+        
+        # Check if execution is paused
+        if execution.execution_id in self.paused_executions:
+            logger.info(f"Execution {execution.execution_id} is paused, waiting...")
+            while execution.execution_id in self.paused_executions:
+                await asyncio.sleep(1)
+        
+        # Create checkpoint before step execution
+        await self.create_checkpoint(
+            execution.execution_id, 
+            CheckpointType.STEP_START, 
+            step.step_id
+        )
         
         try:
             step_execution.status = StepStatus.RUNNING
@@ -130,6 +338,13 @@ class WorkflowEngine:
                 
                 # Update workflow context using output mapping
                 self._map_step_output(step, step_execution.output_data, execution.context)
+                
+                # Create checkpoint after successful step completion
+                await self.create_checkpoint(
+                    execution.execution_id,
+                    CheckpointType.STEP_COMPLETE,
+                    step.step_id
+                )
                 
                 logger.info(f"Step {step.name} completed successfully")
             else:
