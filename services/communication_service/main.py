@@ -1,12 +1,14 @@
-# services/communication_service/main.py - WORKING VERSION
-"""Working main FastAPI application based on the no-lifespan approach."""
+# services/communication_service/main.py
+"""Working main FastAPI application with all imports fixed."""
 
 import asyncio
 import logging
 import sys
 import os
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
+from typing import Dict, Any
+import httpx
 import uvicorn
 
 # Add project root to path
@@ -15,6 +17,7 @@ sys.path.insert(0, project_root)
 
 from services.communication_service.config import settings
 from services.communication_service.routes import events, webhooks, queues, health
+from services.communication_service.models import EventPublishRequest
 
 # Configure logging
 logging.basicConfig(
@@ -46,6 +49,27 @@ _components = {
     "webhook_manager": None,
     "queue_manager": None
 }
+
+# Background task to forward events to monitoring
+async def forward_event_to_monitoring(event_data: Dict[str, Any]):
+    """Forward received events to monitoring service."""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.post(
+                "http://localhost:8003/events/process",
+                json=event_data
+            )
+            response.raise_for_status()
+            
+    except Exception as e:
+        logger.warning(f"Failed to forward event to monitoring: {str(e)}")
+
+def get_event_publisher(request: Request):
+    """Get event publisher from app state."""
+    ensure_app_state()
+    if not hasattr(request.app.state, 'event_publisher'):
+        raise HTTPException(status_code=500, detail="Event publisher not initialized")
+    return request.app.state.event_publisher
 
 def get_or_create_component(component_name: str):
     """Lazy initialization of components (copied from working no-lifespan version)."""
@@ -153,6 +177,43 @@ async def root():
             "Async processing"
         ]
     }
+
+@app.post("/events/publish")
+async def publish_event(
+    request: EventPublishRequest,
+    background_tasks: BackgroundTasks,
+    event_publisher = Depends(get_event_publisher)
+):
+    """Publish an event to the message bus."""
+    try:
+        event_id = await event_publisher.publish_custom_event(
+            event_type=request.event_type,
+            source_service=request.source_service,
+            source_id=request.source_id,
+            priority=request.priority,
+            payload=request.payload,
+            metadata=request.metadata,
+            correlation_id=request.correlation_id
+        )
+        
+        # Forward to monitoring service in background
+        background_tasks.add_task(
+            forward_event_to_monitoring,
+            {
+                "event_type": request.event_type.value,
+                "source_service": request.source_service,
+                "source_id": request.source_id,
+                "priority": request.priority.value,
+                "payload": request.payload,
+                "metadata": request.metadata
+            }
+        )
+        
+        return {"event_id": event_id, "status": "published"}
+        
+    except Exception as e:
+        logger.error(f"Failed to publish event: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/stats")
 async def get_service_stats():
